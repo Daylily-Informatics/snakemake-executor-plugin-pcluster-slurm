@@ -382,9 +382,9 @@ set-resources:
 Be sure to use sensible settings for your cluster and make use of parallel execution (e.g. threads) and [global profiles](#using-profiles) to avoid I/O contention. 
 
 
-## Summary:
+# Summary:
 
-When put together, a frequent command line looks like:
+When put together, the invocation of a Snakemake workflow on a pcluster-SLURM cluster might look like this:
 
 ```console
 $ snakemake --workflow-profile <path> \
