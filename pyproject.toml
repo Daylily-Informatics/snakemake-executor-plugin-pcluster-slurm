@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "snakemake-executor-plugin-pcluster-slurm"
+version = "0.0.7"
+description = "A Snakemake executor plugin for submitting jobs to an AWS Parallel Cluster (pcluster) SLURM cluster."
+authors = [
+    "John Major <john@daylilyinformatics.com>",
+    "Cal <cal@daylilyinformatics.com>"
+]
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/Daylily-Informatics/snakemake-executor-plugin-pcluster-slurm"
+documentation = "https://snakemake.github.io/snakemake-plugin-catalog/plugins/executor/pcluster-slurm.NOTWRITTENYET.html"
+keywords = ["snakemake", "plugin", "executor", "cluster", "slurm", "pcluster", "aws", "parallel-compute", "parallel-cluster"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+snakemake-interface-common = "^1.13.0"
+snakemake-interface-executor-plugins = "^9.1.1"
+snakemake-executor-plugin-slurm-jobstep = "^0.2.0"
+throttler = "^1.2.2"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.7.0"
+flake8 = "^6.1.0"
+coverage = "^7.3.1"
+pytest = "^7.4.2"
+snakemake = "^8.20.0"
+
+[tool.coverage.run]
+omit = [".*", "*/site-packages/*", "Snakefile"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
