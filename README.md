@@ -34,4 +34,4 @@ snakemake --use-conda --use-singularity -j 10  --singularity-prefix /fsx/resourc
 ```
 
 # More Documentation Pending For:
-## How slurm uses `--comment` to tag resources created by the autoscaling cluster to tracke and mnage budgets.
+## How slurm uses `--comment` to tag resources created by the autoscaling cluster to tracke and mnage budgets. 
