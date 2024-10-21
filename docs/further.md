@@ -20,14 +20,14 @@ _I do find it madeningly confusing as to how to set sbatch flags globally to app
 To specify them at the command line, define them as default resources:
 
 ``` console
-$ snakemake --executor slurm --default-resources slurm_account=<your SLURM account> slurm_partition=<your SLURM partition>
+$ snakemake --executor slurm --default-resources  slurm_partition=<your SLURM partition>
 ```
 
 If individual rules require e.g. a different partition, you can override
 the default per rule:
 
 ``` console
-$ snakemake --executor slurm --default-resources slurm_account=<your SLURM account> slurm_partition=<your SLURM partition> --set-resources <somerule>:slurm_partition=<some other partition>
+$ snakemake --executor slurm --default-resources slurm_partition=<your SLURM partition> --set-resources <somerule>:slurm_partition=<some other partition>
 ```
 
 Usually, it is advisable to persist such settings via a
@@ -152,7 +152,6 @@ A sample configuration file as specified by the `--workflow-profile` flag might 
 ```YAML
 default-resources:
     slurm_partition: "<your default partition>"
-    slurm_account:   "<your account>
 
 set-resources:
     <rulename>:
@@ -382,14 +381,14 @@ set-resources:
 Be sure to use sensible settings for your cluster and make use of parallel execution (e.g. threads) and [global profiles](#using-profiles) to avoid I/O contention. 
 
 
-# Summary:
+## Summary:
 
-When put together, the invocation of a Snakemake workflow on a pcluster-SLURM cluster might look like this:
+When put together, a frequent command line looks like:
 
 ```console
 $ snakemake --workflow-profile <path> \
 > -j unlimited \ # assuming an unlimited number of jobs
-> --default-resources slurm_account=<account> slurm_partition=<default partition> \
+> --default-resources  slurm_partition=<default partition> \
 > --configfile config/config.yaml \
 > --directory <path> # assuming a data path not relative to the workflow
 ```
