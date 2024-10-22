@@ -154,6 +154,7 @@ class Executor(RemoteExecutor):
         call = (
             f"sbatch "
             f"--parsable "
+            f"--no-requeue "
             f"--comment '{comment_str}' "
             f"--job-name '{job.name}-{self.run_uuid}' "
             f"--distribution block "
