@@ -319,37 +319,40 @@ EOF
                     # Assume job is still running
                     yield job_info
 
+def cancel_jobs(self, active_jobs: List[SubmittedJobInfo]):
+    """Cancel all active jobs without triggering node shutdown."""
+    if active_jobs:
+        # Collect job IDs to cancel
+        jobids = " ".join([job_info.external_jobid for job_info in active_jobs])
 
-    def cancel_jobs(self, active_jobs: List[SubmittedJobInfo]):
-        # Cancel all active jobs.
-        # This method is called when Snakemake is interrupted.
-        if active_jobs:
-            # TODO chunk jobids in order to avoid too long command lines
-            jobids = " ".join([job_info.external_jobid for job_info in active_jobs])
-            try:
-                # timeout set to 60, because a scheduler cycle usually is
-                # about 30 sec, but can be longer in extreme cases.
-                # Under 'normal' circumstances, 'scancel' is executed in
-                # virtually no time.
-                scancel_command = f"scancel {jobids} --clusters=all"
+        try:
+            # Send the TERM signal to gracefully terminate jobs without node scaling
+            scancel_command = f"scancel --signal=TERM {jobids} --clusters=all"
 
-                subprocess.check_output(
-                    scancel_command,
-                    text=True,
-                    shell=True,
-                    timeout=60,
-                    stderr=subprocess.PIPE,
-                )
-            except subprocess.TimeoutExpired:
-                self.logger.warning("Unable to cancel jobs within a minute.")
-            except subprocess.CalledProcessError as e:
-                msg = e.stderr.strip()
-                if msg:
-                    msg = f": {msg}"
-                raise WorkflowError(
-                    "Unable to cancel jobs with scancel "
-                    f"(exit code {e.returncode}){msg}"
-                ) from e
+            self.logger.info(f"Cancelling jobs with command: {scancel_command}")
+            
+            # Execute the scancel command with a 60-second timeout
+            subprocess.check_output(
+                scancel_command,
+                text=True,
+                shell=True,
+                timeout=60,
+                stderr=subprocess.PIPE,
+            )
+            self.logger.info("Jobs cancelled successfully.")
+        except subprocess.TimeoutExpired:
+            self.logger.warning("Unable to cancel jobs within the timeout period.")
+        except subprocess.CalledProcessError as e:
+            # Log any scancel errors
+            msg = e.stderr.strip()
+            if msg:
+                msg = f": {msg}"
+            raise WorkflowError(
+                f"Unable to cancel jobs with scancel (exit code {e.returncode}){msg}"
+            ) from e
+        except Exception as e:
+            self.logger.error(f"Unexpected error during job cancellation: {e}")
+
 
     def get_partition_arg(self, job: JobExecutorInterface):
         """
