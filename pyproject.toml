@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "snakemake-executor-plugin-pcluster-slurm"
-version = "0.0.25"
+version = "0.0.30"
 description = "A Snakemake executor plugin for submitting jobs to an AWS Parallel Cluster (pcluster) SLURM cluster."
 authors = [
     "John Major <john@daylilyinformatics.com>",
