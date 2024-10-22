@@ -165,7 +165,9 @@ class Executor(RemoteExecutor):
         call += self.get_partition_arg(job)
 
         if self.workflow.executor_settings.requeue:
-            call += " --requeue"
+            call += " --no-requeue"
+        else:
+            call += " --no-requeue"
 
         if job.resources.get("clusters"):
             call += f" --clusters {job.resources.clusters}"
