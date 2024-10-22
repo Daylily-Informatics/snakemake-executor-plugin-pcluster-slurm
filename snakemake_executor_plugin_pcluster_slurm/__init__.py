@@ -25,7 +25,7 @@ from snakemake_interface_executor_plugins.jobs import (
     JobExecutorInterface,
 )
 from snakemake_interface_common.exceptions import WorkflowError
-from snakemake_executor_plugin_slurm_jobstep import get_cpus_per_task
+#from snakemake_executor_plugin_slurm_jobstep import get_cpus_per_task
 
 from .utils import delete_slurm_environment
 
@@ -147,7 +147,7 @@ class Executor(RemoteExecutor):
         # Add partition and resources if defined
         call += self.get_partition_arg(job)
         call += f" --ntasks={job.resources.get('tasks', 1)} "
-        call += f" --cpus-per-task={max(1, get_cpus_per_task(job))} "
+        call += f" --cpus-per-task={max(1, job.threads)}"  
         if job.resources.get("mem_mb"):
             call += f" --mem={job.resources['mem_mb']}"
 
