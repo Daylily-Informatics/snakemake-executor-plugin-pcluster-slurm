@@ -100,8 +100,8 @@ class Executor(RemoteExecutor):
     def _handle_exit(self, signum, frame):
         """Handle termination signals to cancel active Slurm jobs."""
         self.logger.info(f"Received signal {signum}. Canceling all active jobs.")
-        active_jobs = self.get_active_jobs()
-        self.cancel_jobs(active_jobs)
+        
+        self.cancel_jobs(self.active_jobs)
         self.logger.info("All jobs canceled. Exiting.")
         exit(1)
 
