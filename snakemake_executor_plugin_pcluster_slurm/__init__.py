@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import subprocess
+import signal
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -91,6 +92,18 @@ class Executor(RemoteExecutor):
         self._fallback_account_arg = None
         self._fallback_partition = None
         self._preemption_warning = False  # no preemption warning has been issued
+        # Register signal handlers to ensure jobs are killed on exit
+        self.active_jobs = []
+        signal.signal(signal.SIGINT, self._handle_exit)
+        signal.signal(signal.SIGTERM, self._handle_exit)
+
+    def _handle_exit(self, signum, frame):
+        """Handle termination signals to cancel active Slurm jobs."""
+        self.logger.info(f"Received signal {signum}. Canceling all active jobs.")
+        active_jobs = self.get_active_jobs()
+        self.cancel_jobs(active_jobs)
+        self.logger.info("All jobs canceled. Exiting.")
+        exit(1)
 
     def warn_on_jobcontext(self, done=None):
         if not done:
@@ -108,157 +121,84 @@ class Executor(RemoteExecutor):
         return "--executor slurm-jobstep --jobs 1"
 
     def run_job(self, job: JobExecutorInterface):
-        # Implement here how to run a job.
-        # You can access the job's resources, etc.
-        # via the job object.
-        # After submitting the job, you have to call
-        # self.report_job_submission(job_info).
-        # with job_info being of type
-        # snakemake_interface_executor_plugins.executors.base.SubmittedJobInfo.
-
+        """Submit a job to SLURM and track it for cancellation if needed."""
+        # Determine job group or rule name
         group_or_rule = f"group_{job.name}" if job.is_group() else f"rule_{job.name}"
+        wildcard_str = "_".join(job.wildcards) if job.wildcards else ""
 
-        try:
-            wildcard_str = "_".join(job.wildcards) if job.wildcards else ""
-        except AttributeError:
-            wildcard_str = ""
-
-        slurm_logfile = os.path.abspath(
-            f".snakemake/slurm_logs/{group_or_rule}/{wildcard_str}/%j.log"
-        )
-        logdir = os.path.dirname(slurm_logfile)
+        # Prepare log file paths
+        log_dir = f".snakemake/slurm_logs/{group_or_rule}/{wildcard_str}"
+        os.makedirs(log_dir, exist_ok=True)
         
-        slurm_errorlogfile = os.path.abspath(
-            f".snakemake/slurm_logs/{group_or_rule}/{wildcard_str}/%j.err"
-        )
-        errlogdir = os.path.dirname(slurm_errorlogfile)
-        
-        # this behavior has been fixed in slurm 23.02, but there might be plenty of
-        # older versions around, hence we should rather be conservative here.
-        assert "%j" not in logdir, (
-            "bug: jobid placeholder in parent dir of logfile. This does not work as "
-            "we have to create that dir before submission in order to make sbatch "
-            "happy. Otherwise we get silent fails without logfiles being created."
-        )
-        os.makedirs(logdir, exist_ok=True)
+        slurm_logfile = os.path.abspath(f"{log_dir}/%j.log")
+        slurm_errorlogfile = os.path.abspath(f"{log_dir}/%j.err")
 
-        # generic part of a submission string:
-        # we use a run_uuid as the job-name, to allow `--name`-based
-        # filtering in the job status checks (`sacct --name` and `squeue --name`)
-
-        #if wildcard_str == "":
-        #    comment_str = f"rule_{job.name}"
-        #else:
-        #    comment_str = f"rule_{job.name}_wildcards_{wildcard_str}"
-        comment_str=os.getenv('SMK_SLURM_COMMENT','RandD')
+        # SLURM job submission command
+        comment_str = os.getenv('SMK_SLURM_COMMENT', 'RandD')
         call = (
-            f"sbatch "
-            f"--parsable "
-            f"--no-requeue "
+            f"sbatch --parsable --no-requeue "
             f"--comment '{comment_str}' "
             f"--job-name '{job.name}-{self.run_uuid}' "
-            f"--distribution block "
             f"--chdir {os.getcwd()} "
             f"--error '{slurm_errorlogfile}' "
             f"--output '{slurm_logfile}' "
         )
 
+        # Add partition and resources if defined
         call += self.get_partition_arg(job)
+        call += f" --ntasks={job.resources.get('tasks', 1)} "
+        call += f" --cpus-per-task={max(1, get_cpus_per_task(job))} "
+        if job.resources.get("mem_mb"):
+            call += f" --mem={job.resources['mem_mb']}"
 
-        if self.workflow.executor_settings.requeue:
-            call += " --no-requeue"
-        else:
-            call += " --no-requeue"
-
-        if job.resources.get("clusters"):
-            call += f" --clusters {job.resources.clusters}"
-
-        if job.resources.get("runtime"):
-            call += f" -t {job.resources.runtime}"
-        else:
-            self.logger.warning(
-                "No wall time information given. This might or might not "
-                "work on your cluster. "
-                "If not, specify the resource runtime in your rule or as a reasonable "
-                "default via --default-resources."
-            )
-
-        if job.resources.get("constraint"):
-            call += f" -C '{job.resources.constraint}'"
-        if job.resources.get("mem_mb_per_cpu"):
-            call += f" --mem-per-cpu {job.resources.mem_mb_per_cpu}"
-        elif job.resources.get("mem_mb"):
-            call += f" --mem {job.resources.mem_mb}"
-        else:
-            self.logger.warning(
-                "No job memory information ('mem_mb' or 'mem_mb_per_cpu') is given "
-                "- submitting without. This might or might not work on your cluster."
-            )
-
-        if job.resources.get("nodes", False):
-            call += f" --nodes={job.resources.get('nodes', 1)}"
-
-        # fixes #40 - set ntasks regardless of mpi, because
-        # SLURM v22.05 will require it for all jobs
-        call += f" --ntasks={job.resources.get('tasks', 1)}"
-        # MPI job
-        if job.resources.get("mpi", False):
-            if not job.resources.get("tasks_per_node") and not job.resources.get(
-                "nodes"
-            ):
-                self.logger.warning(
-                    "MPI job detected, but no 'tasks_per_node' or 'nodes' "
-                    "specified. Assuming 'tasks_per_node=1'."
-                    "Probably not what you want."
-                )
-        
-        n_cpus = 1 if int(get_cpus_per_task(job)) <= 1 else int(get_cpus_per_task(job))
-        
-        call += f" --cpus-per-task={n_cpus}"
-
-        if job.resources.get("slurm_extra"):
-            self.check_slurm_extra(job)
-            call += f" {job.resources.slurm_extra}"
-
+        # Generate the execution command
         exec_job = self.format_job_exec(job)
+        call += f" -D {self.workflow.workdir_init} <<EOF\n#!/bin/bash\n{exec_job}\nEOF"
 
-        # ensure that workdir is set correctly
-        # use short argument as this is the same in all slurm versions
-        # (see https://github.com/snakemake/snakemake/issues/2014)
-        call += f" -D {self.workflow.workdir_init}"
-        # and finally the job to execute with all the snakemake parameters
-        call += f''' <<EOF
-#!/bin/bash
-{exec_job}
-EOF
-'''
-
-        self.logger.debug(f"sbatch call: {call}")
+        # Submit the job to SLURM
         try:
-            out = subprocess.check_output(
-                call, shell=True, text=True, stderr=subprocess.STDOUT
-            ).strip()
-        except subprocess.CalledProcessError as e:
-            raise WorkflowError(
-                f"SLURM job submission failed. The error message was {e.output}"
-            )
+            out = subprocess.check_output(call, shell=True, text=True, stderr=subprocess.STDOUT).strip()
+            slurm_jobid = out.split(";")[0]
+            slurm_logfile = slurm_logfile.replace("%j", slurm_jobid)
 
-        # multicluster submissions yield submission infos like
-        # "Submitted batch job <id> on cluster <name>" by default, but with the
-        # --parsable option it simply yields "<id>;<name>".
-        # To extract the job id we split by semicolon and take the first element
-        # (this also works if no cluster name was provided)
-        slurm_jobid = out.split(";")[0]
-        slurm_logfile = slurm_logfile.replace("%j", slurm_jobid)
-        self.logger.info(
-            f"Job {job.jobid} has been submitted with SLURM jobid {slurm_jobid} "
-            f"(log: {slurm_logfile})."
-        )
-        self.report_job_submission(
-            SubmittedJobInfo(
-                job, external_jobid=slurm_jobid, aux={"slurm_logfile": slurm_logfile}
+            self.logger.info(f"Job {job.jobid} submitted with SLURM jobid {slurm_jobid} (log: {slurm_logfile}).")
+
+            # Track active job for future cancellation
+            submitted_job = SubmittedJobInfo(job, external_jobid=slurm_jobid, aux={"slurm_logfile": slurm_logfile})
+            self.active_jobs.append(submitted_job)
+            self.report_job_submission(submitted_job)
+
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"SLURM job submission failed: {e.output}")
+            raise WorkflowError(f"SLURM job submission failed: {e.output}")
+
+
+            self.logger.debug(f"sbatch call: {call}")
+            try:
+                out = subprocess.check_output(
+                    call, shell=True, text=True, stderr=subprocess.STDOUT
+                ).strip()
+            except subprocess.CalledProcessError as e:
+                raise WorkflowError(
+                    f"SLURM job submission failed. The error message was {e.output}"
+                )
+
+            # multicluster submissions yield submission infos like
+            # "Submitted batch job <id> on cluster <name>" by default, but with the
+            # --parsable option it simply yields "<id>;<name>".
+            # To extract the job id we split by semicolon and take the first element
+            # (this also works if no cluster name was provided)
+            slurm_jobid = out.split(";")[0]
+            slurm_logfile = slurm_logfile.replace("%j", slurm_jobid)
+            self.logger.info(
+                f"Job {job.jobid} has been submitted with SLURM jobid {slurm_jobid} "
+                f"(log: {slurm_logfile})."
             )
-        )
+            self.report_job_submission(
+                SubmittedJobInfo(
+                    job, external_jobid=slurm_jobid, aux={"slurm_logfile": slurm_logfile}
+                )
+            )
         
     async def check_active_jobs(
         self, active_jobs: List[SubmittedJobInfo]
@@ -320,20 +260,12 @@ EOF
                     # Assume job is still running
                     yield job_info
 
-
     def cancel_jobs(self, active_jobs: List[SubmittedJobInfo]):
-        # Cancel all active jobs.
-        # This method is called when Snakemake is interrupted.
+        """Cancel all active Slurm jobs."""
         if active_jobs:
-            # TODO chunk jobids in order to avoid too long command lines
             jobids = " ".join([job_info.external_jobid for job_info in active_jobs])
             try:
-                # timeout set to 60, because a scheduler cycle usually is
-                # about 30 sec, but can be longer in extreme cases.
-                # Under 'normal' circumstances, 'scancel' is executed in
-                # virtually no time.
-                scancel_command = f"scancel {jobids} --clusters=all"
-
+                scancel_command = f"scancel {jobids}"
                 subprocess.check_output(
                     scancel_command,
                     text=True,
@@ -341,16 +273,13 @@ EOF
                     timeout=60,
                     stderr=subprocess.PIPE,
                 )
+                self.logger.info(f"Successfully canceled jobs: {jobids}")
             except subprocess.TimeoutExpired:
-                self.logger.warning("Unable to cancel jobs within a minute.")
+                self.logger.warning("Unable to cancel jobs within the timeout period.")
             except subprocess.CalledProcessError as e:
                 msg = e.stderr.strip()
-                if msg:
-                    msg = f": {msg}"
-                raise WorkflowError(
-                    "Unable to cancel jobs with scancel "
-                    f"(exit code {e.returncode}){msg}"
-                ) from e
+                self.logger.error(f"Failed to cancel jobs: {msg}")
+
 
     def get_partition_arg(self, job: JobExecutorInterface):
         """
