@@ -1,4 +1,4 @@
-# Snakemake executor plugin: pcluster-slurm v_0.0.7_
+# Snakemake executor plugin: pcluster-slurm _0.0.31_
 
 # Snakemake Executor Plugins (generally)
 [Snakemake plugin catalog docs](https://snakemake.github.io/snakemake-plugin-catalog/plugins/executor).
