@@ -10,7 +10,7 @@
 #### [Daylily Bfx Framework](https://github.com/Daylily-Informatics/daylily)
 [Daylily](https://github.com/Daylily-Informatics/daylily) is a bioinformatics framework that automates and standardizes all aspects of creating a self-scaling ephemeral cluster which can grow from 1 head node to many thousands of as-needed compute spot instances (modulo your quotas and budget). This is accomplished by using [AWS Parallel Cluster](https://aws.amazon.com/hpc/parallelcluster/) to manage the cluster, and snakemake to manage the bfx workflows. In this context, `slurm` is the intermediary between snakemake and the cluster resource management. The `pcluster` slurm variant does not play nicely with vanilla slurm, and to date, the slurm snakemake executor has not worked with `pcluster` slurm. This plugin is a bridge between snakemake and `pcluster-slurm`.
 
-
+ 
 
 # Pre-requisites
 ## Snakemake >=8.*
